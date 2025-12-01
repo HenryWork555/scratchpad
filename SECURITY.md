@@ -20,11 +20,11 @@
 - Graceful degradation with wait time notifications
 
 ### File System Security
-- Workspace isolation enforcement
-- Allowed directory whitelist
-- File extension restrictions
+- Fixed Desktop location (no workspace traversal possible)
+- File extension restrictions (.md, .txt, .markdown only)
 - File size limits (1MB max)
 - Path length limits (256 chars max)
+- Automatic statistics updates (no user control over counts)
 
 ### Error Handling
 - Sanitized error messages prevent information disclosure

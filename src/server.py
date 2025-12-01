@@ -451,6 +451,226 @@ class ScratchpadManager:
             "task": task
         }
     
+    def add_to_review_later(self, note: str) -> Dict[str, Any]:
+        """Add an item to the 'To Review Later' section."""
+        # Validate and sanitize input
+        note = InputValidator.sanitize_text(note, SecurityConfig.MAX_NOTE_LENGTH)
+        
+        content = self.read_scratchpad()
+        now = datetime.now()
+        date_str = now.strftime("%d/%m/%Y")
+        
+        lines = content.split("\n")
+        review_idx = None
+        
+        for i, line in enumerate(lines):
+            if "## 🔄 To Review Later" in line:
+                review_idx = i
+                break
+        
+        if review_idx is None:
+            raise ValueError("Invalid scratchpad format: missing To Review Later section")
+        
+        # Check if section is empty
+        if "_Empty - all caught up!_" in lines[review_idx + 4]:
+            # Replace empty message with first item
+            lines[review_idx + 4] = f"- [ ] {note}"
+        else:
+            # Add to the list (insert before the "---" separator)
+            insert_idx = review_idx + 4
+            # Find where items end (before next section)
+            for i in range(review_idx + 4, len(lines)):
+                if lines[i].strip() == "---":
+                    insert_idx = i
+                    break
+            lines.insert(insert_idx, f"- [ ] {note}")
+        
+        new_content = "\n".join(lines)
+        self.write_scratchpad(new_content)
+        self._update_statistics()
+        
+        print(f"📋 Added to review: {note[:50]}...", file=sys.stderr)
+        
+        return {
+            "success": True,
+            "note": note,
+            "date": date_str
+        }
+    
+    def mark_completed(self, note: str) -> Dict[str, Any]:
+        """Mark an item as completed (adds to Completed Today section)."""
+        # Validate and sanitize input
+        note = InputValidator.sanitize_text(note, SecurityConfig.MAX_NOTE_LENGTH)
+        
+        content = self.read_scratchpad()
+        now = datetime.now()
+        time_str = now.strftime("%H:%M")
+        date_str = now.strftime("%d/%m/%Y")
+        date_header = f"### 📅 {date_str}"
+        
+        lines = content.split("\n")
+        completed_idx = None
+        date_section_idx = None
+        
+        for i, line in enumerate(lines):
+            if "## ✅ Completed Today" in line:
+                completed_idx = i
+            elif completed_idx and date_header in line:
+                date_section_idx = i
+                break
+        
+        if completed_idx is None:
+            raise ValueError("Invalid scratchpad format: missing Completed Today section")
+        
+        # Create completion entry
+        completion_entry = f"- [x] {note} _({time_str})_"
+        
+        if date_section_idx is not None:
+            # Date section exists, check if it's empty
+            if "_No completions yet_" in lines[date_section_idx + 2]:
+                lines[date_section_idx + 2] = completion_entry
+            else:
+                lines.insert(date_section_idx + 3, completion_entry)
+        else:
+            # Create new date section
+            insert_idx = completed_idx + 3
+            new_section = [
+                "",
+                date_header,
+                "",
+                completion_entry,
+            ]
+            for idx, section_line in enumerate(new_section):
+                lines.insert(insert_idx + idx, section_line)
+        
+        new_content = "\n".join(lines)
+        self.write_scratchpad(new_content)
+        self._update_statistics()
+        
+        print(f"✅ Completed: {note[:50]}...", file=sys.stderr)
+        
+        return {
+            "success": True,
+            "note": note,
+            "time": time_str,
+            "date": date_str
+        }
+    
+    def archive_item(self, note: str) -> Dict[str, Any]:
+        """Archive/dismiss an item."""
+        # Validate and sanitize input
+        note = InputValidator.sanitize_text(note, SecurityConfig.MAX_NOTE_LENGTH)
+        
+        content = self.read_scratchpad()
+        now = datetime.now()
+        date_str = now.strftime("%d/%m/%Y")
+        
+        lines = content.split("\n")
+        archived_idx = None
+        
+        for i, line in enumerate(lines):
+            if "## 🗑️ Archived / Dismissed" in line:
+                archived_idx = i
+                break
+        
+        if archived_idx is None:
+            raise ValueError("Invalid scratchpad format: missing Archived section")
+        
+        # Find the "Old Ideas / Resolved Items" section inside details
+        old_ideas_idx = None
+        for i in range(archived_idx, len(lines)):
+            if "### Old Ideas / Resolved Items" in lines[i]:
+                old_ideas_idx = i
+                break
+        
+        if old_ideas_idx is None:
+            raise ValueError("Invalid scratchpad format: missing Old Ideas section")
+        
+        # Check if section is empty
+        if "_Nothing archived yet_" in lines[old_ideas_idx + 2]:
+            lines[old_ideas_idx + 2] = f"- ~~{note}~~ _({date_str})_"
+        else:
+            lines.insert(old_ideas_idx + 3, f"- ~~{note}~~ _({date_str})_")
+        
+        new_content = "\n".join(lines)
+        self.write_scratchpad(new_content)
+        self._update_statistics()
+        
+        print(f"🗑️ Archived: {note[:50]}...", file=sys.stderr)
+        
+        return {
+            "success": True,
+            "note": note,
+            "date": date_str
+        }
+    
+    def _update_statistics(self) -> None:
+        """Update usage statistics automatically."""
+        content = self.read_scratchpad()
+        now = datetime.now()
+        date_str = now.strftime("%d/%m/%Y")
+        
+        lines = content.split("\n")
+        
+        # Count items in each section
+        total_logged = 0
+        total_completed = 0
+        total_archived = 0
+        
+        in_interruptions = False
+        in_completed = False
+        in_archived = False
+        
+        for line in lines:
+            if "## 💡 Interruptions / Ideas" in line:
+                in_interruptions = True
+                in_completed = False
+                in_archived = False
+            elif "## ✅ Completed Today" in line:
+                in_interruptions = False
+                in_completed = True
+                in_archived = False
+            elif "## 🗑️ Archived / Dismissed" in line:
+                in_interruptions = False
+                in_completed = False
+                in_archived = True
+            elif line.startswith("##"):
+                in_interruptions = False
+                in_completed = False
+                in_archived = False
+            
+            # Count items
+            if in_interruptions and line.startswith("| `"):
+                total_logged += 1
+            elif in_completed and line.startswith("- [x]"):
+                total_completed += 1
+            elif in_archived and line.startswith("- ~~"):
+                total_archived += 1
+        
+        # Update statistics section
+        stats_idx = None
+        for i, line in enumerate(lines):
+            if "## 📊 Usage Statistics" in line:
+                stats_idx = i
+                break
+        
+        if stats_idx is not None:
+            # Update the statistics lines
+            lines[stats_idx + 2] = f"- **Total Ideas Logged:** {total_logged}"
+            lines[stats_idx + 3] = f"- **Items Completed:** {total_completed}"
+            lines[stats_idx + 4] = f"- **Items Archived:** {total_archived}"
+            lines[stats_idx + 5] = f"- **Last Updated:** {date_str}"
+            
+            new_content = "\n".join(lines)
+            
+            # Write without checking rate limit (internal update)
+            content_bytes = new_content.encode('utf-8')
+            if len(content_bytes) <= SecurityConfig.MAX_FILE_SIZE:
+                try:
+                    self.scratchpad_path.write_text(new_content, encoding="utf-8")
+                except OSError:
+                    pass  # Silently fail on stats update
+    
     def _get_template(self, date: str) -> str:
         """Get scratchpad template."""
         return f"""# 📋 AI Scratchpad
@@ -639,6 +859,60 @@ async def list_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        Tool(
+            name="scratchpad_add_to_review_later",
+            description=(
+                "Add an item to the 'To Review Later' section for follow-up. "
+                f"Note limited to {SecurityConfig.MAX_NOTE_LENGTH} characters."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "note": {
+                        "type": "string",
+                        "description": "The item to add for review later",
+                        "maxLength": SecurityConfig.MAX_NOTE_LENGTH,
+                    }
+                },
+                "required": ["note"],
+            },
+        ),
+        Tool(
+            name="scratchpad_mark_completed",
+            description=(
+                "Mark an item as completed. Adds it to 'Completed Today' section. "
+                f"Note limited to {SecurityConfig.MAX_NOTE_LENGTH} characters."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "note": {
+                        "type": "string",
+                        "description": "The completed item",
+                        "maxLength": SecurityConfig.MAX_NOTE_LENGTH,
+                    }
+                },
+                "required": ["note"],
+            },
+        ),
+        Tool(
+            name="scratchpad_archive_item",
+            description=(
+                "Archive/dismiss an item. Moves it to 'Archived / Dismissed' section. "
+                f"Note limited to {SecurityConfig.MAX_NOTE_LENGTH} characters."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "note": {
+                        "type": "string",
+                        "description": "The item to archive",
+                        "maxLength": SecurityConfig.MAX_NOTE_LENGTH,
+                    }
+                },
+                "required": ["note"],
+            },
+        ),
     ]
 
 
@@ -694,6 +968,45 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 type="text",
                 text=f"📍 Scratchpad location: {manager.scratchpad_path}\nStatus: {status}"
             )]
+        
+        elif name == "scratchpad_add_to_review_later":
+            note = arguments.get("note", "")
+            if not note:
+                raise ValueError("Note is required")
+            
+            result = manager.add_to_review_later(note)
+            
+            response = (
+                f"✅ Added to 'To Review Later'\n\n"
+                f"**Note:** {result['note']}"
+            )
+            return [TextContent(type="text", text=response)]
+        
+        elif name == "scratchpad_mark_completed":
+            note = arguments.get("note", "")
+            if not note:
+                raise ValueError("Note is required")
+            
+            result = manager.mark_completed(note)
+            
+            response = (
+                f"✅ Marked as completed at {result['time']}\n\n"
+                f"**Note:** {result['note']}"
+            )
+            return [TextContent(type="text", text=response)]
+        
+        elif name == "scratchpad_archive_item":
+            note = arguments.get("note", "")
+            if not note:
+                raise ValueError("Note is required")
+            
+            result = manager.archive_item(note)
+            
+            response = (
+                f"✅ Archived/dismissed\n\n"
+                f"**Note:** {result['note']}"
+            )
+            return [TextContent(type="text", text=response)]
         
         else:
             return [TextContent(

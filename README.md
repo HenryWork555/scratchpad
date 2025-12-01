@@ -15,8 +15,12 @@ A secure Model Context Protocol (MCP) server for managing a global AI scratchpad
 
 * 📝 **Log Interruptions**: Capture ideas without losing focus
 * 🎯 **Track Current Focus**: Update and maintain your current task
+* 🔄 **Review Later**: Queue items for follow-up consideration
+* ✅ **Mark Completed**: Track accomplishments with timestamps
+* 🗑️ **Archive Items**: Dismiss or archive old ideas
+* 📊 **Auto Statistics**: Automatically tracks logged, completed, and archived items
 * 🌍 **Global Scratchpad**: Single scratchpad on Desktop accessible from all projects
-* 📊 **Organized Storage**: Markdown-based scratchpad with sections
+* 📋 **Organized Storage**: Markdown-based scratchpad with sections
 * 🔐 **Secure by Design**: Input validation, rate limiting, path protection
 * ⚡ **Fast & Lightweight**: Minimal dependencies, quick operations
 
@@ -107,6 +111,45 @@ Update your current focus/task.
 ```json
 {
   "task": "Implementing user authentication flow"
+}
+```
+
+#### 6. `scratchpad_add_to_review_later`
+Add an item to the "To Review Later" section for follow-up.
+
+**Parameters:**
+- `note` (required): The item to add (max 500 chars)
+
+**Example:**
+```json
+{
+  "note": "Research better caching strategy for API calls"
+}
+```
+
+#### 7. `scratchpad_mark_completed`
+Mark an item as completed. Adds it to "Completed Today" with timestamp.
+
+**Parameters:**
+- `note` (required): The completed item (max 500 chars)
+
+**Example:**
+```json
+{
+  "note": "Fixed authentication bug in login flow"
+}
+```
+
+#### 8. `scratchpad_archive_item`
+Archive/dismiss an item. Moves it to "Archived / Dismissed" section.
+
+**Parameters:**
+- `note` (required): The item to archive (max 500 chars)
+
+**Example:**
+```json
+{
+  "note": "Old idea that's no longer relevant"
 }
 ```
 
