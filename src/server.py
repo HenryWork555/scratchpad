@@ -19,6 +19,7 @@ import sys
 import json
 import re
 import time
+import argparse
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -597,6 +598,50 @@ _Last session: {date} at --:--_
 
 
 # ========================================
+# WORKSPACE DETECTION
+# ========================================
+
+def detect_workspace() -> str:
+    """
+    Detect workspace directory automatically.
+    
+    Priority order:
+    1. Command-line argument --workspace
+    2. Environment variable WORKSPACE_PATH
+    3. Current working directory
+    """
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description="AI Scratchpad MCP Server",
+        add_help=False  # Disable help to avoid conflicts with MCP stdio
+    )
+    parser.add_argument(
+        '--workspace',
+        type=str,
+        help='Workspace directory path (default: current directory or WORKSPACE_PATH env var)'
+    )
+    
+    args, _ = parser.parse_known_args()
+    
+    # Priority 1: Command-line argument
+    if args.workspace:
+        workspace = args.workspace
+        print(f"📂 Using workspace from --workspace flag: {workspace}", file=sys.stderr)
+        return workspace
+    
+    # Priority 2: Environment variable
+    if os.getenv("WORKSPACE_PATH"):
+        workspace = os.getenv("WORKSPACE_PATH")
+        print(f"📂 Using workspace from WORKSPACE_PATH env: {workspace}", file=sys.stderr)
+        return workspace
+    
+    # Priority 3: Current working directory
+    workspace = os.getcwd()
+    print(f"📂 Using current working directory as workspace: {workspace}", file=sys.stderr)
+    return workspace
+
+
+# ========================================
 # MCP SERVER
 # ========================================
 
@@ -605,7 +650,7 @@ app = Server("scratchpad-mcp")
 
 # Initialize manager (will be created per-workspace)
 try:
-    workspace = os.getenv("WORKSPACE_PATH") or os.getcwd()
+    workspace = detect_workspace()
     manager = ScratchpadManager(workspace)
 except Exception as e:
     print(f"❌ Failed to initialize scratchpad manager: {e}", file=sys.stderr)

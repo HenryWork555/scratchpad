@@ -49,6 +49,36 @@ chmod +x src/server.py
 
 Add to your MCP client configuration (e.g., Claude Desktop):
 
+**Option 1: Auto-detect workspace (simplest)**
+```json
+{
+  "mcpServers": {
+    "scratchpad": {
+      "command": "python3",
+      "args": ["/path/to/scratchpad/src/server.py"]
+    }
+  }
+}
+```
+The workspace will be auto-detected from the current working directory.
+
+**Option 2: Specify workspace via command-line argument**
+```json
+{
+  "mcpServers": {
+    "scratchpad": {
+      "command": "python3",
+      "args": [
+        "/path/to/scratchpad/src/server.py",
+        "--workspace",
+        "/path/to/your-project"
+      ]
+    }
+  }
+}
+```
+
+**Option 3: Specify workspace via environment variable**
 ```json
 {
   "mcpServers": {
@@ -153,11 +183,20 @@ All inputs are sanitized to prevent:
 
 ## Security Best Practices
 
-### 1. Workspace Isolation
-Always set `WORKSPACE_PATH` to restrict operations to a specific directory:
+### 1. Workspace Detection
+The server automatically detects the workspace in this priority order:
+1. `--workspace` command-line argument (highest priority)
+2. `WORKSPACE_PATH` environment variable
+3. Current working directory (auto-detected)
+
+To explicitly set a workspace:
 
 ```bash
+# Via environment variable
 export WORKSPACE_PATH="/path/to/your-project"
+
+# Or via command-line argument
+python3 src/server.py --workspace /path/to/your-project
 ```
 
 ### 2. File Permissions
