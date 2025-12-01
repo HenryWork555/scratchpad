@@ -1,6 +1,6 @@
 # AI Scratchpad MCP Server
 
-A secure Model Context Protocol (MCP) server for managing AI scratchpad files during development sessions. Track interruptions, ideas, tasks, and maintain focus while coding.
+A secure Model Context Protocol (MCP) server for managing a global AI scratchpad file. Track interruptions, ideas, tasks, and maintain focus across all your projects with a single scratchpad on your Desktop.
 
 ## 🔒 Security Features
 
@@ -15,6 +15,7 @@ A secure Model Context Protocol (MCP) server for managing AI scratchpad files du
 
 * 📝 **Log Interruptions**: Capture ideas without losing focus
 * 🎯 **Track Current Focus**: Update and maintain your current task
+* 🌍 **Global Scratchpad**: Single scratchpad on Desktop accessible from all projects
 * 📊 **Organized Storage**: Markdown-based scratchpad with sections
 * 🔐 **Secure by Design**: Input validation, rate limiting, path protection
 * ⚡ **Fast & Lightweight**: Minimal dependencies, quick operations
@@ -49,7 +50,6 @@ chmod +x src/server.py
 
 Add to your MCP client configuration (e.g., Claude Desktop):
 
-**Option 1: Auto-detect workspace (simplest)**
 ```json
 {
   "mcpServers": {
@@ -60,56 +60,18 @@ Add to your MCP client configuration (e.g., Claude Desktop):
   }
 }
 ```
-The workspace will be auto-detected from the current working directory.
 
-**Option 2: Specify workspace via command-line argument**
-```json
-{
-  "mcpServers": {
-    "scratchpad": {
-      "command": "python3",
-      "args": [
-        "/path/to/scratchpad/src/server.py",
-        "--workspace",
-        "/path/to/your-project"
-      ]
-    }
-  }
-}
-```
-
-**Option 3: Specify workspace via environment variable**
-```json
-{
-  "mcpServers": {
-    "scratchpad": {
-      "command": "python3",
-      "args": ["/path/to/scratchpad/src/server.py"],
-      "env": {
-        "WORKSPACE_PATH": "/path/to/your-project"
-      }
-    }
-  }
-}
-```
+The scratchpad will be created at `~/Desktop/scratchpad/scratchpad.md` and accessible from all your projects.
 
 ### Available Tools
 
 #### 1. `scratchpad_create`
-Create a new scratchpad file.
+Create a new scratchpad file at `~/Desktop/scratchpad/scratchpad.md`.
 
-**Parameters:**
-- `location` (optional): Path relative to workspace (default: `.idea/scratchpad.md`)
+**No parameters required.**
 
-**Example:**
-```json
-{
-  "location": ".idea/scratchpad.md"
-}
-```
-
-#### 2. `scratchpad_find`
-Find existing scratchpad in workspace.
+#### 2. `scratchpad_get_path`
+Get the scratchpad file path and check if it exists.
 
 **No parameters required.**
 
@@ -150,14 +112,12 @@ Update your current focus/task.
 
 ## 🔒 Security Configuration
 
-### Allowed Directories
-Scratchpads must be created in:
-- `.idea/`
-- `.vscode/`
-- `.dart_tool/`
-- `.cache/`
-- `docs/`
-- `.scratchpad/`
+### Scratchpad Location
+The scratchpad is always located at:
+- **Primary**: `~/Desktop/scratchpad/scratchpad.md`
+- **Fallback**: `~/scratchpad/scratchpad.md` (if Desktop doesn't exist)
+
+This fixed location prevents path traversal attacks and unauthorized file access.
 
 ### File Restrictions
 - **Extensions**: Only `.md`, `.txt`, `.markdown`
@@ -183,34 +143,18 @@ All inputs are sanitized to prevent:
 
 ## Security Best Practices
 
-### 1. Workspace Detection
-The server automatically detects the workspace in this priority order:
-1. `--workspace` command-line argument (highest priority)
-2. `WORKSPACE_PATH` environment variable
-3. Current working directory (auto-detected)
-
-To explicitly set a workspace:
+### 1. File Permissions
+Ensure the scratchpad directory has appropriate permissions:
 
 ```bash
-# Via environment variable
-export WORKSPACE_PATH="/path/to/your-project"
-
-# Or via command-line argument
-python3 src/server.py --workspace /path/to/your-project
+chmod 755 ~/Desktop/scratchpad
+chmod 644 ~/Desktop/scratchpad/scratchpad.md
 ```
 
-### 2. File Permissions
-Ensure scratchpad directories have appropriate permissions:
-
-```bash
-chmod 755 .idea
-chmod 644 .idea/scratchpad.md
-```
-
-### 3. Regular Cleanup
+### 2. Regular Cleanup
 Monitor scratchpad file sizes and archive old content regularly.
 
-### 4. Error Monitoring
+### 3. Error Monitoring
 Check stderr output for security warnings:
 
 ```bash
@@ -222,14 +166,11 @@ python3 src/server.py 2>scratchpad-errors.log
 ### "Rate limit exceeded" Error
 Wait for the specified time or restart the server to reset the rate limiter.
 
-### "Path must be within workspace" Error
-Ensure your `WORKSPACE_PATH` is set correctly and the location is valid.
-
-### "File extension must be one of..." Error
-Use only `.md`, `.txt`, or `.markdown` files.
-
 ### "Scratchpad not found" Error
-Create a scratchpad first using `scratchpad_create`.
+The scratchpad doesn't exist yet. Use `scratchpad_create` to create it at `~/Desktop/scratchpad/scratchpad.md`.
+
+### Desktop Not Found
+If `~/Desktop` doesn't exist, the scratchpad will be created at `~/scratchpad/scratchpad.md` instead.
 
 ## Development
 
@@ -248,8 +189,8 @@ The server outputs operational info to stderr:
 
 ```
 🔒 Scratchpad MCP initialized
-📁 Workspace: /path/to/your-project
-✅ Created scratchpad: .idea/scratchpad.md
+📁 Scratchpad location: /Users/username/Desktop/scratchpad/scratchpad.md
+✅ Created scratchpad: /Users/username/Desktop/scratchpad/scratchpad.md
 📝 Logged: Bug - Add error handling...
 ```
 

@@ -19,7 +19,6 @@ import sys
 import json
 import re
 import time
-import argparse
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -52,20 +51,13 @@ class SecurityConfig:
     MAX_FILE_SIZE = 1024 * 1024  # 1MB
     MAX_PATH_LENGTH = 256
     
-    # Allowed scratchpad locations (relative to workspace)
-    ALLOWED_DIRECTORIES = {
-        ".idea",
-        ".vscode",
-        ".dart_tool",
-        ".cache",
-        "docs",
-        ".scratchpad",
-    }
+    # Default scratchpad location
+    DEFAULT_SCRATCHPAD_DIR = "scratchpad"  # Creates ~/Desktop/scratchpad/
+    DEFAULT_SCRATCHPAD_FILE = "scratchpad.md"
     
     # Dangerous patterns to block
     BLOCKED_PATTERNS = [
         r'\.\.',  # Path traversal
-        r'~',     # Home directory
         r'\$',    # Environment variables
         r'`',     # Command execution
         r'<script',  # XSS attempts
@@ -79,13 +71,16 @@ class SecurityConfig:
 
 
 # Configuration
-SCRATCHPAD_SEARCH_PATHS = [
-    ".idea/scratchpad.md",
-    ".vscode/scratchpad.md",
-    ".dart_tool/scratchpad.md",
-    ".cache/scratchpad.md",
-    ".scratchpad/scratchpad.md",
-]
+def get_default_scratchpad_path() -> Path:
+    """Get the default scratchpad path on Desktop."""
+    home = Path.home()
+    desktop = home / "Desktop"
+    
+    # Fallback to home directory if Desktop doesn't exist
+    if not desktop.exists():
+        desktop = home
+    
+    return desktop / SecurityConfig.DEFAULT_SCRATCHPAD_DIR / SecurityConfig.DEFAULT_SCRATCHPAD_FILE
 
 TYPE_EMOJIS = {
     "idea": "💡",
@@ -165,48 +160,28 @@ class InputValidator:
         return text
     
     @staticmethod
-    def validate_path(path: str, workspace: Path) -> Path:
-        """Validate and resolve path safely."""
-        if not isinstance(path, str):
-            raise ValueError("Path must be a string")
+    def validate_filename(filename: str) -> str:
+        """Validate filename (not path, just the file name)."""
+        if not isinstance(filename, str):
+            raise ValueError("Filename must be a string")
         
-        if len(path) > SecurityConfig.MAX_PATH_LENGTH:
-            raise ValueError(f"Path exceeds maximum length of {SecurityConfig.MAX_PATH_LENGTH}")
+        if len(filename) > SecurityConfig.MAX_PATH_LENGTH:
+            raise ValueError(f"Filename exceeds maximum length")
         
         # Check for blocked patterns
         for pattern in SecurityConfig.BLOCKED_PATTERNS:
-            if re.search(pattern, path):
-                raise ValueError(f"Path contains blocked pattern")
+            if re.search(pattern, filename):
+                raise ValueError(f"Filename contains blocked pattern")
         
-        # Convert to Path and resolve
-        try:
-            full_path = (workspace / path).resolve()
-        except (ValueError, OSError) as e:
-            raise ValueError(f"Invalid path: {e}")
-        
-        # Ensure path is within workspace
-        try:
-            full_path.relative_to(workspace.resolve())
-        except ValueError:
-            raise ValueError("Path must be within workspace")
+        # No path separators allowed
+        if '/' in filename or '\\' in filename:
+            raise ValueError("Filename cannot contain path separators")
         
         # Check file extension
-        if full_path.suffix.lower() not in SecurityConfig.ALLOWED_EXTENSIONS:
+        if not any(filename.endswith(ext) for ext in SecurityConfig.ALLOWED_EXTENSIONS):
             raise ValueError(f"File extension must be one of: {SecurityConfig.ALLOWED_EXTENSIONS}")
         
-        # Check directory is allowed
-        try:
-            relative = full_path.relative_to(workspace.resolve())
-            top_dir = relative.parts[0] if relative.parts else None
-            
-            if top_dir and top_dir not in SecurityConfig.ALLOWED_DIRECTORIES:
-                raise ValueError(
-                    f"Scratchpad must be in allowed directory: {SecurityConfig.ALLOWED_DIRECTORIES}"
-                )
-        except (ValueError, IndexError):
-            raise ValueError("Invalid directory structure")
-        
-        return full_path
+        return filename
     
     @staticmethod
     def validate_enum(value: str, allowed: List[str], default: str) -> str:
@@ -248,22 +223,12 @@ class ErrorSanitizer:
 class ScratchpadManager:
     """Manages scratchpad file operations with security and validation."""
     
-    def __init__(self, workspace_path: Optional[str] = None):
+    def __init__(self):
         """Initialize scratchpad manager."""
-        # Set workspace
-        if workspace_path:
-            self.workspace_path = Path(workspace_path).resolve()
-        else:
-            self.workspace_path = Path.cwd().resolve()
+        # Set default scratchpad location
+        self.scratchpad_path = get_default_scratchpad_path()
+        self.scratchpad_dir = self.scratchpad_path.parent
         
-        # Verify workspace exists and is accessible
-        if not self.workspace_path.exists():
-            raise ValueError(f"Workspace path does not exist: {self.workspace_path}")
-        
-        if not self.workspace_path.is_dir():
-            raise ValueError(f"Workspace path is not a directory: {self.workspace_path}")
-        
-        self._scratchpad_path: Optional[Path] = None
         self.rate_limiter = RateLimiter(
             SecurityConfig.MAX_REQUESTS_PER_MINUTE,
             SecurityConfig.RATE_LIMIT_WINDOW
@@ -271,7 +236,7 @@ class ScratchpadManager:
         
         # Log initialization
         print(f"🔒 Scratchpad MCP initialized", file=sys.stderr)
-        print(f"📁 Workspace: {self.workspace_path}", file=sys.stderr)
+        print(f"📁 Scratchpad location: {self.scratchpad_path}", file=sys.stderr)
     
     def _check_rate_limit(self) -> None:
         """Check rate limit and raise error if exceeded."""
@@ -292,39 +257,22 @@ class ScratchpadManager:
                     f"({SecurityConfig.MAX_FILE_SIZE} bytes)"
                 )
     
-    def find_scratchpad(self) -> Optional[Path]:
-        """Find scratchpad in standard locations."""
+    def scratchpad_exists(self) -> bool:
+        """Check if scratchpad file exists."""
         self._check_rate_limit()
-        
-        if self._scratchpad_path and self._scratchpad_path.exists():
-            return self._scratchpad_path
-        
-        for search_path in SCRATCHPAD_SEARCH_PATHS:
-            try:
-                full_path = InputValidator.validate_path(search_path, self.workspace_path)
-                if full_path.exists():
-                    self._validate_file_size(full_path)
-                    self._scratchpad_path = full_path
-                    return full_path
-            except ValueError:
-                continue  # Skip invalid paths
-        
-        return None
+        return self.scratchpad_path.exists()
     
-    def create_scratchpad(self, location: str = ".idea/scratchpad.md") -> Path:
-        """Create a new scratchpad at specified location."""
+    def create_scratchpad(self) -> Path:
+        """Create scratchpad file if it doesn't exist."""
         self._check_rate_limit()
-        
-        # Validate and resolve path
-        full_path = InputValidator.validate_path(location, self.workspace_path)
         
         # Check if already exists
-        if full_path.exists():
-            raise ValueError(f"Scratchpad already exists at: {location}")
+        if self.scratchpad_path.exists():
+            raise ValueError(f"Scratchpad already exists at: {self.scratchpad_path}")
         
-        # Create parent directories
+        # Create parent directory
         try:
-            full_path.parent.mkdir(parents=True, exist_ok=True)
+            self.scratchpad_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
             raise ValueError(f"Failed to create directory: {e}")
         
@@ -338,28 +286,26 @@ class ScratchpadManager:
         
         # Write file
         try:
-            full_path.write_text(template, encoding="utf-8")
+            self.scratchpad_path.write_text(template, encoding="utf-8")
         except OSError as e:
             raise ValueError(f"Failed to write file: {e}")
         
-        self._scratchpad_path = full_path
-        print(f"✅ Created scratchpad: {full_path}", file=sys.stderr)
+        print(f"✅ Created scratchpad: {self.scratchpad_path}", file=sys.stderr)
         
-        return full_path
+        return self.scratchpad_path
     
     def read_scratchpad(self) -> str:
         """Read scratchpad contents."""
         self._check_rate_limit()
         
-        path = self.find_scratchpad()
-        if not path:
+        if not self.scratchpad_path.exists():
             raise FileNotFoundError("Scratchpad not found. Create one first.")
         
         # Validate file size before reading
-        self._validate_file_size(path)
+        self._validate_file_size(self.scratchpad_path)
         
         try:
-            content = path.read_text(encoding="utf-8")
+            content = self.scratchpad_path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             raise ValueError("File contains invalid UTF-8 encoding")
         except OSError as e:
@@ -371,8 +317,7 @@ class ScratchpadManager:
         """Write scratchpad contents."""
         self._check_rate_limit()
         
-        path = self.find_scratchpad()
-        if not path:
+        if not self.scratchpad_path.exists():
             raise FileNotFoundError("Scratchpad not found. Create one first.")
         
         # Validate content size
@@ -384,7 +329,7 @@ class ScratchpadManager:
             )
         
         try:
-            path.write_text(content, encoding="utf-8")
+            self.scratchpad_path.write_text(content, encoding="utf-8")
         except OSError as e:
             raise ValueError(f"Failed to write file: {e}")
     
@@ -598,60 +543,15 @@ _Last session: {date} at --:--_
 
 
 # ========================================
-# WORKSPACE DETECTION
-# ========================================
-
-def detect_workspace() -> str:
-    """
-    Detect workspace directory automatically.
-    
-    Priority order:
-    1. Command-line argument --workspace
-    2. Environment variable WORKSPACE_PATH
-    3. Current working directory
-    """
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(
-        description="AI Scratchpad MCP Server",
-        add_help=False  # Disable help to avoid conflicts with MCP stdio
-    )
-    parser.add_argument(
-        '--workspace',
-        type=str,
-        help='Workspace directory path (default: current directory or WORKSPACE_PATH env var)'
-    )
-    
-    args, _ = parser.parse_known_args()
-    
-    # Priority 1: Command-line argument
-    if args.workspace:
-        workspace = args.workspace
-        print(f"📂 Using workspace from --workspace flag: {workspace}", file=sys.stderr)
-        return workspace
-    
-    # Priority 2: Environment variable
-    if os.getenv("WORKSPACE_PATH"):
-        workspace = os.getenv("WORKSPACE_PATH")
-        print(f"📂 Using workspace from WORKSPACE_PATH env: {workspace}", file=sys.stderr)
-        return workspace
-    
-    # Priority 3: Current working directory
-    workspace = os.getcwd()
-    print(f"📂 Using current working directory as workspace: {workspace}", file=sys.stderr)
-    return workspace
-
-
-# ========================================
 # MCP SERVER
 # ========================================
 
 # Initialize MCP server
 app = Server("scratchpad-mcp")
 
-# Initialize manager (will be created per-workspace)
+# Initialize manager
 try:
-    workspace = detect_workspace()
-    manager = ScratchpadManager(workspace)
+    manager = ScratchpadManager()
 except Exception as e:
     print(f"❌ Failed to initialize scratchpad manager: {e}", file=sys.stderr)
     sys.exit(1)
@@ -673,20 +573,12 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="scratchpad_create",
             description=(
-                "Create a new scratchpad at the specified location. "
-                f"Location must be in allowed directories: {SecurityConfig.ALLOWED_DIRECTORIES}. "
-                f"Must have extension: {SecurityConfig.ALLOWED_EXTENSIONS}"
+                "Create a new scratchpad file at ~/Desktop/scratchpad/scratchpad.md. "
+                "Creates the directory if it doesn't exist."
             ),
             inputSchema={
                 "type": "object",
-                "properties": {
-                    "location": {
-                        "type": "string",
-                        "description": "Path for scratchpad (default: .idea/scratchpad.md)",
-                        "default": ".idea/scratchpad.md",
-                        "maxLength": SecurityConfig.MAX_PATH_LENGTH,
-                    }
-                },
+                "properties": {},
                 "required": [],
             },
         ),
@@ -739,8 +631,8 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
-            name="scratchpad_find",
-            description="Find the scratchpad location in the workspace",
+            name="scratchpad_get_path",
+            description="Get the scratchpad file path and check if it exists",
             inputSchema={
                 "type": "object",
                 "properties": {},
@@ -759,12 +651,10 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             return [TextContent(type="text", text=content)]
         
         elif name == "scratchpad_create":
-            location = arguments.get("location", ".idea/scratchpad.md")
-            path = manager.create_scratchpad(location)
-            rel_path = path.relative_to(manager.workspace_path)
+            path = manager.create_scratchpad()
             return [TextContent(
                 type="text",
-                text=f"✅ Scratchpad created at: {rel_path}"
+                text=f"✅ Scratchpad created at: {path}"
             )]
         
         elif name == "scratchpad_log_interruption":
@@ -797,19 +687,13 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             )
             return [TextContent(type="text", text=response)]
         
-        elif name == "scratchpad_find":
-            path = manager.find_scratchpad()
-            if path:
-                rel_path = path.relative_to(manager.workspace_path)
-                return [TextContent(
-                    type="text",
-                    text=f"📍 Scratchpad found at: {rel_path}"
-                )]
-            else:
-                return [TextContent(
-                    type="text",
-                    text="❌ No scratchpad found. Use scratchpad_create to create one."
-                )]
+        elif name == "scratchpad_get_path":
+            exists = manager.scratchpad_exists()
+            status = "✅ exists" if exists else "❌ not found"
+            return [TextContent(
+                type="text",
+                text=f"📍 Scratchpad location: {manager.scratchpad_path}\nStatus: {status}"
+            )]
         
         else:
             return [TextContent(

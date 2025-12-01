@@ -1,7 +1,7 @@
 {
   "name": "scratchpad-mcp",
   "version": "1.0.0",
-  "description": "A secure MCP server for managing AI scratchpad files during development sessions",
+  "description": "A secure MCP server for managing a global AI scratchpad on your Desktop",
   "main": "src/server.py",
   "scripts": {
     "start": "python3 src/server.py"
