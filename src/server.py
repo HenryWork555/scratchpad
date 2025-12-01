@@ -499,7 +499,7 @@ class ScratchpadManager:
         }
     
     def mark_completed(self, note: str) -> Dict[str, Any]:
-        """Mark an item as completed (adds to Completed Today section)."""
+        """Mark an item as completed and remove it from interruptions/review."""
         # Validate and sanitize input
         note = InputValidator.sanitize_text(note, SecurityConfig.MAX_NOTE_LENGTH)
         
@@ -510,6 +510,44 @@ class ScratchpadManager:
         date_header = f"### 📅 {date_str}"
         
         lines = content.split("\n")
+        
+        # Try to remove from Interruptions section
+        removed_from_interruptions = False
+        in_interruptions = False
+        line_to_remove = None
+        
+        for i, line in enumerate(lines):
+            if "## 💡 Interruptions / Ideas" in line:
+                in_interruptions = True
+            elif line.startswith("##") and not line.startswith("###"):
+                in_interruptions = False
+            
+            # Check if this line contains the note in interruptions table
+            if in_interruptions and line.startswith("| `") and note in line:
+                line_to_remove = i
+                break
+        
+        # Remove the line if found
+        if line_to_remove is not None:
+            del lines[line_to_remove]
+            removed_from_interruptions = True
+        
+        # Also try to remove from "To Review Later"
+        removed_from_review = False
+        review_idx = None
+        
+        for i, line in enumerate(lines):
+            if "## 🔄 To Review Later" in line:
+                review_idx = i
+            elif review_idx and line.startswith("##"):
+                break
+            
+            # Check if this line contains the note in review later list
+            if review_idx and line.strip().startswith("- [ ]") and note in line:
+                del lines[i]
+                removed_from_review = True
+                break
+        
         completed_idx = None
         date_section_idx = None
         
@@ -548,17 +586,24 @@ class ScratchpadManager:
         self.write_scratchpad(new_content)
         self._update_statistics()
         
-        print(f"✅ Completed: {note[:50]}...", file=sys.stderr)
+        source = ""
+        if removed_from_interruptions:
+            source = " (from Interruptions)"
+        elif removed_from_review:
+            source = " (from Review Later)"
+        
+        print(f"✅ Completed{source}: {note[:50]}...", file=sys.stderr)
         
         return {
             "success": True,
             "note": note,
             "time": time_str,
-            "date": date_str
+            "date": date_str,
+            "removed_from": "interruptions" if removed_from_interruptions else ("review" if removed_from_review else "none")
         }
     
     def archive_item(self, note: str) -> Dict[str, Any]:
-        """Archive/dismiss an item."""
+        """Archive/dismiss an item and remove it from interruptions."""
         # Validate and sanitize input
         note = InputValidator.sanitize_text(note, SecurityConfig.MAX_NOTE_LENGTH)
         
@@ -567,8 +612,46 @@ class ScratchpadManager:
         date_str = now.strftime("%d/%m/%Y")
         
         lines = content.split("\n")
-        archived_idx = None
         
+        # First, try to remove from Interruptions section
+        removed_from_interruptions = False
+        in_interruptions = False
+        line_to_remove = None
+        
+        for i, line in enumerate(lines):
+            if "## 💡 Interruptions / Ideas" in line:
+                in_interruptions = True
+            elif line.startswith("##") and not line.startswith("###"):
+                in_interruptions = False
+            
+            # Check if this line contains the note in interruptions table
+            if in_interruptions and line.startswith("| `") and note in line:
+                line_to_remove = i
+                break
+        
+        # Remove the line if found
+        if line_to_remove is not None:
+            del lines[line_to_remove]
+            removed_from_interruptions = True
+        
+        # Also try to remove from "To Review Later"
+        removed_from_review = False
+        review_idx = None
+        
+        for i, line in enumerate(lines):
+            if "## 🔄 To Review Later" in line:
+                review_idx = i
+            elif review_idx and line.startswith("##"):
+                break
+            
+            # Check if this line contains the note in review later list
+            if review_idx and line.strip().startswith("- [ ]") and note in line:
+                del lines[i]
+                removed_from_review = True
+                break
+        
+        # Find archived section
+        archived_idx = None
         for i, line in enumerate(lines):
             if "## 🗑️ Archived / Dismissed" in line:
                 archived_idx = i
@@ -587,7 +670,7 @@ class ScratchpadManager:
         if old_ideas_idx is None:
             raise ValueError("Invalid scratchpad format: missing Old Ideas section")
         
-        # Check if section is empty
+        # Add to archived section
         if "_Nothing archived yet_" in lines[old_ideas_idx + 2]:
             lines[old_ideas_idx + 2] = f"- ~~{note}~~ _({date_str})_"
         else:
@@ -597,12 +680,19 @@ class ScratchpadManager:
         self.write_scratchpad(new_content)
         self._update_statistics()
         
-        print(f"🗑️ Archived: {note[:50]}...", file=sys.stderr)
+        source = ""
+        if removed_from_interruptions:
+            source = " (from Interruptions)"
+        elif removed_from_review:
+            source = " (from Review Later)"
+        
+        print(f"🗑️ Archived{source}: {note[:50]}...", file=sys.stderr)
         
         return {
             "success": True,
             "note": note,
-            "date": date_str
+            "date": date_str,
+            "removed_from": "interruptions" if removed_from_interruptions else ("review" if removed_from_review else "none")
         }
     
     def _update_statistics(self) -> None:

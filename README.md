@@ -128,7 +128,7 @@ Add an item to the "To Review Later" section for follow-up.
 ```
 
 #### 7. `scratchpad_mark_completed`
-Mark an item as completed. Adds it to "Completed Today" with timestamp.
+Mark an item as completed. Adds it to "Completed Today" with timestamp and **removes it from Interruptions/Review Later**.
 
 **Parameters:**
 - `note` (required): The completed item (max 500 chars)
@@ -141,7 +141,7 @@ Mark an item as completed. Adds it to "Completed Today" with timestamp.
 ```
 
 #### 8. `scratchpad_archive_item`
-Archive/dismiss an item. Moves it to "Archived / Dismissed" section.
+Archive/dismiss an item. Moves it to "Archived / Dismissed" section and **removes it from Interruptions/Review Later**.
 
 **Parameters:**
 - `note` (required): The item to archive (max 500 chars)
