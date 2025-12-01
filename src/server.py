@@ -404,6 +404,7 @@ class ScratchpadManager:
         
         new_content = "\n".join(lines)
         self.write_scratchpad(new_content)
+        self._update_statistics()
         
         print(f"📝 Logged: {type_label} - {note[:50]}...", file=sys.stderr)
         
@@ -606,7 +607,11 @@ class ScratchpadManager:
     
     def _update_statistics(self) -> None:
         """Update usage statistics automatically."""
-        content = self.read_scratchpad()
+        try:
+            content = self.read_scratchpad()
+        except:
+            return  # Silently fail if we can't read
+        
         now = datetime.now()
         date_str = now.strftime("%d/%m/%Y")
         
@@ -622,6 +627,7 @@ class ScratchpadManager:
         in_archived = False
         
         for line in lines:
+            # Section detection
             if "## 💡 Interruptions / Ideas" in line:
                 in_interruptions = True
                 in_completed = False
@@ -634,13 +640,15 @@ class ScratchpadManager:
                 in_interruptions = False
                 in_completed = False
                 in_archived = True
-            elif line.startswith("##"):
-                in_interruptions = False
-                in_completed = False
-                in_archived = False
+            elif line.startswith("##") and not line.startswith("###"):
+                # New major section (but not date headers)
+                if "Old Ideas / Resolved Items" not in line:
+                    in_interruptions = False
+                    in_completed = False
+                    in_archived = False
             
-            # Count items
-            if in_interruptions and line.startswith("| `"):
+            # Count items (archived flag stays on through <details> tags)
+            if in_interruptions and line.startswith("| `") and "---" not in line:
                 total_logged += 1
             elif in_completed and line.startswith("- [x]"):
                 total_completed += 1
